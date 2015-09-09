@@ -45,7 +45,10 @@ def setup_logging(app):
         app.config['APP_LOG_FILE'],
         backupCount=app.config['APP_LOG_NUM_BACKUPS'],
         maxBytes=app.config['APP_LOG_FILESIZE'])
-    handler.setLevel(logging.INFO)
+    if app.debug:
+        handler.setLevel(logging.DEBUG)
+    else:
+        handler.setLevel(logging.INFO)
     formatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s')
     handler.setFormatter(formatter)
     app.logger.addHandler(handler)
