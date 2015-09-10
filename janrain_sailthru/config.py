@@ -49,7 +49,9 @@ def setup_logging(app):
         handler.setLevel(logging.DEBUG)
     else:
         handler.setLevel(logging.INFO)
-    formatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s')
+    msg_format = '[%(asctime)s] %(levelname)s: %(message)s'
+    timestamp_format = '%Y-%m-%d %H:%M:%S%z'
+    formatter = logging.Formatter(msg_format, timestamp_format)
     handler.setFormatter(formatter)
     app.logger.addHandler(handler)
     app.logger.setLevel(logging.DEBUG)
