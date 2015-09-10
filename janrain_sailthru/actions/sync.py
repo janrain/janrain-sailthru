@@ -58,7 +58,6 @@ def sync():
             app.logger.debug("capture error: {}".format(str(err)))
             app.logger.error("capture error: failed to fetch record")
             return 'fail (capture)'
-        app.logger.debug("capture record: {}".format(record))
 
         # get values from the capture record
         values = [dot_lookup(record, x) for x in attributes]
@@ -66,14 +65,16 @@ def sync():
         attributes_dict = dict(zip(sailthru_attributes, values))
 
         sailthru_payload = {
-            'id': record['email'],
-            'extid': record['uuid'],
+            'keys': {
+                'email': record['email'],
+                'extid': record['uuid'],
+            },
+            'keysconflict': 'merge',
             'vars': attributes_dict,
             'lists': lists_dict,
         }
 
-        app.logger.debug("sailthru payload: {}".format(sailthru_payload))
-        app.logger.info("sending record to sailthru: {}".format(sailthru_payload['extid']))
+        app.logger.info("sending record to sailthru: {}".format(sailthru_payload['keys']['extid']))
         # creates or updates a user (upsert)
         response = sailthru_client.api_post('user', sailthru_payload)
         if response.is_ok():
