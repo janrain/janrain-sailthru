@@ -65,16 +65,17 @@ def sync():
         attributes_dict = dict(zip(sailthru_attributes, values))
 
         sailthru_payload = {
+            'id': record['uuid'],
+            'key': 'extid',
             'keys': {
                 'email': record['email'],
-                'extid': record['uuid'],
             },
             'keysconflict': 'merge',
             'vars': attributes_dict,
             'lists': lists_dict,
         }
 
-        app.logger.info("sending record to sailthru: {}".format(sailthru_payload['keys']['extid']))
+        app.logger.info("sending record to sailthru: {}".format(record['uuid']))
         # creates or updates a user (upsert)
         response = sailthru_client.api_post('user', sailthru_payload)
         if response.is_ok():
