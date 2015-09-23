@@ -1,7 +1,7 @@
 """Sync action."""
 from flask import current_app as app
 from flask import request
-from sailthru.sailthru_client import SailthruClient
+from sailthru import SailthruClient
 import janrain_datalib
 
 def sync():
@@ -11,7 +11,7 @@ def sync():
     """
     webhook_payload = request.json
     if not webhook_payload:
-        app.logger.warning("no webhook payload data detected in request: aborting")
+        app.logger.warning("aborting: no webhook payload data in request")
         return 'no webhook payload'
     app.logger.debug("webhook payload: {}".format(webhook_payload))
 
@@ -26,63 +26,84 @@ def sync():
         app.config['SAILTHRU_API_SECRET'])
 
     if not app.config['JANRAIN_ATTRIBUTES']:
-        app.logger.warning("no attributes specified in config: aborting")
+        app.logger.warning("aborting: no attributes specified in config")
         return 'no attributes'
+    app.logger.debug("attributes: {}".format(app.config['JANRAIN_ATTRIBUTES']))
 
+    # convert attributes from string to list
     attributes = [x.strip() for x in app.config['JANRAIN_ATTRIBUTES'].split(',')]
-    # these attributes will be handled separately
+    # uuid and email will be handled separately as keys
     if 'email' in attributes:
         attributes.remove('email')
     if 'uuid' in attributes:
         attributes.remove('uuid')
 
-    # replace dots with underscores (sailthru will strip dots from field names)
-    sailthru_attributes = [x.replace('.', '_') for x in attributes]
-    if not app.config['SAILTHRU_LISTS']:
-        sailthru_lists = {}
-    else:
-        sailthru_lists = [x.strip() for x in app.config['SAILTHRU_LISTS'].split(',')]
-    # map list name to 1 for add or 0 for remove
-    lists_dict = dict(zip(sailthru_lists, [1 for _ in range(len(sailthru_lists))]))
+    # replace dots with underscores (sailthru strips out dots)
+    sailthru_fields = [x.replace('.', '_') for x in attributes]
 
     for item in webhook_payload:
         uuid = item['uuid']
-        # always include uuid and email in capture record
-        record = capture_schema.records.get_record(uuid)
-        record_attributes = attributes + ['uuid', 'email']
 
-        app.logger.info("retrieving record from capture: {}".format(uuid))
+        app.logger.info("{}: retrieving record from capture".format(uuid))
+        record = capture_schema.records.get_record(uuid)
         try:
-            record = record.as_dict(record_attributes)
+            # include email
+            record = record.as_dict(attributes + ['email'])
         except janrain_datalib.exceptions.ApiError as err:
-            app.logger.debug("capture error: {}".format(str(err)))
-            app.logger.error("capture error: failed to fetch record")
+            app.logger.error("{}: capture: {}".format(uuid, str(err)))
             return 'fail (capture)'
 
-        # get values from the capture record
+        # get values from the capture record as a flattened list
         values = [dot_lookup(record, x) for x in attributes]
-        # map new attribute names to values
-        attributes_dict = dict(zip(sailthru_attributes, values))
+        # map sailthru attribute names to values
+        sailthru_vars = dict(zip(sailthru_fields, values))
 
+        app.logger.info("{}: retrieving record from sailthru with matching email".format(uuid))
+        # lookup record in sailthru via email
         sailthru_payload = {
-            'id': record['uuid'],
-            'key': 'extid',
-            'keys': {
-                'email': record['email'],
-            },
-            'keysconflict': 'merge',
-            'vars': attributes_dict,
-            'lists': lists_dict,
+            'id': record['email'],
+            'key': 'email',
         }
+        response = sailthru_client.api_get('user', sailthru_payload)
 
-        app.logger.info("sending record to sailthru: {}".format(record['uuid']))
-        # creates or updates a user (upsert)
-        response = sailthru_client.api_post('user', sailthru_payload)
+        # matching email found in sailthru
         if response.is_ok():
-            app.logger.debug("sailthru success: {}".format(response.get_body()))
+            app.logger.debug("{}: email match found in sailthru".format(uuid))
+
+            # upsert using email (also set extid)
+            sailthru_payload = {
+                'id': record['email'],
+                'key': 'email',
+                'keys': {
+                    'extid': uuid
+                },
+                'vars': sailthru_vars,
+            }
+
         else:
-            app.logger.debug("sailthru error: {}".format(response.get_error()))
-            app.logger.error("sailthru error: unable to sync record")
+            r_err = response.get_error()
+
+            # a problem happened with the sailthru client
+            if r_err.get_error_code() != 99:
+                app.logger.error("{}: sailthru: {}".format(uuid, r_err))
+                return 'fail (sailthru)'
+
+            # email not found in sailthru
+            app.logger.debug("{}: no matching email found in sailthru".format(uuid))
+            # upsert using extid (also set email)
+            sailthru_payload = {
+                'id': uuid,
+                'key': 'extid',
+                'keys': {
+                    'email': record['email']
+                },
+                'vars': sailthru_vars,
+            }
+
+        app.logger.info("{}: sending record to sailthru".format(uuid))
+        response = sailthru_client.api_post('user', sailthru_payload)
+        if not response.is_ok():
+            app.logger.error("{}: sailthru error: {}".format(uuid, response.get_error()))
             return 'fail (sailthru)'
 
     return 'done'
