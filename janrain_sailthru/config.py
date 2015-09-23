@@ -17,7 +17,6 @@ ENV_VARS = {
     'JANRAIN_ATTRIBUTES': '',
     'SAILTHRU_API_KEY': '',
     'SAILTHRU_API_SECRET': '',
-    'SAILTHRU_LISTS': '',
 }
 
 def get_config():
